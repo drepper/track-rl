@@ -1,0 +1,4 @@
+Reinforcement Learning Example
+==============================
+
+This is an example for a solution of a problem which might be prohibitively expensive to solve using non-probabilistic methods.  The problem is also chosen as one which work well with non-NN solutions, algorithms which are often drowned out in today's world focussed on neural networks.  What people forget is that many or even most solutions using neural networks also use other techniques in combination or series which can significantly increase the efficiency of the model.  It is therefore important to know about as many techniques as possible.
