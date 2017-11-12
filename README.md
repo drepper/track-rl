@@ -100,4 +100,4 @@ It is interesting to investigate earlier states of the learning process.  The fo
 
 We can see that latter parts of the track are not yet well explored.  More interesting is the "best" track at the beginning, though.  It is nowhere close to being a straight line.  This is easy to explain: the epsilon value was 0.1 and therefore the likelihood that a new run follows a non-catastrophic previous run in pretty high, even if that run makes a lot of turns.  Over time there will be runs where the random number generator decides even for the early steps in a run to diverge from the previously learned and explore.  Then it is likely the serpentine routes are going to be straightend out. 
 
-Ulrich Drepper [mailto:drepper@gmail.com](<drepper@gmail.com>)
+Ulrich Drepper [<drepper@gmail.com>](mailto:drepper@gmail.com)
