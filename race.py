@@ -212,7 +212,7 @@ def best_path(dist, score, start, v, tracklen):
         d = dist[co[0]][co[1]]
     return res
 
-def compute(trackname, epsilon, alpha, gamma, Q0, Qfail, Qgoal):
+def compute(trackname, epsilon, alpha, gamma, Q0, Qfail, Qgoal, totalrounds):
     trackfname = trackname+".png"
     with Image.open(trackfname) as track:
         data = track.getdata()
@@ -267,7 +267,6 @@ def compute(trackname, epsilon, alpha, gamma, Q0, Qfail, Qgoal):
         tbbw = tbbr - tbbl + 1
         tbbh = tbbb - tbbt + 1
 
-        totalrounds = 4000000
         tq = tqdm(total=totalrounds, desc=trackname)
         for rounds in range(totalrounds):
             co = (start[0] + startspeed[0], start[1] + startspeed[1])
@@ -366,8 +365,11 @@ if __name__ == '__main__':
     parser.add_argument('--Q0', dest='Q0', type=float, default=0.0, help='Initial Q function value')
     parser.add_argument('--Qfail', dest='Qfail', type=float, default=-10000, help='Q function value for crash')
     parser.add_argument('--Qgoal', dest='Qgoal', type=float, default=1000, help='Q function value for reaching goal')
+    parser.add_argument('--N', dest='nrounds', type=int, default=4000000, help='Number of learning runs')
+    parser.add_argument('--seed', dest='seed', type=int, default=None, help='Seed random number generator')
     args=parser.parse_args()
 
     for trackname in args.fnames:
-        compute(trackname, args.epsilon, args.alpha, args.gamma, args.Q0, args.Qfail, args.Qgoal)
-        pass
+        if args.seed:
+            random.seed(args.seed)
+        compute(trackname, args.epsilon, args.alpha, args.gamma, args.Q0, args.Qfail, args.Qgoal, args.nrounds)
