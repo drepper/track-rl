@@ -2,22 +2,23 @@ from PIL import Image
 import random
 import numpy as np
 from math import log
+import argparse
+from tqdm import tqdm
 import sys
 
-trackname = "track1.png"
+if sys.version_info < (3,0):
+    raise "must use python 3.x"
 
-start = (330, 156)
-startspeed = (1, 0)
-
-epsilon = 0.025
-alpha = 0.25
-gamma = 0.95
-Q0 = 0.1
-
-dist = []
+linecol = (255,255,0)
+startcol = (255,0,0)
+speedcol = (0,0,255)
+emptycol = (0,0,0)
 
 def norm(v):
     return v / abs(v) if v != 0 else 0
+
+def absspeed(speed):
+    return abs(speed[0]) + abs(speed[1])
 
 def getpixel(im, data, x, y):
     return data[y*im.width+x]
@@ -25,92 +26,113 @@ def getpixel(im, data, x, y):
 def setpixel(im, data, x, y, c):
     data[y*im.width+x] = c
 
-def getfinal(im, data, start, startspeed):
-    x, y = start
-    speedx, speedy = startspeed
-    color = getpixel(im, data, x, y)
-    res = { start: True }
-    assert abs(speedx) + abs(speedy) == 1
-    if speedx == 0:
+def colidxs(im):
+    emptyidx = -1
+    lineidx = -1
+    startidx = -1
+    speedidx = -1
+    p = im.getpalette()
+    for i in range(int(len(p) / 3)):
+        if emptyidx == -1 and (p[3*i] == emptycol[0] and p[3*i+1] == emptycol[1] and p[3*i+2] == emptycol[2]):
+            emptyidx = i
+        if lineidx == -1 and (p[3*i] == linecol[0] and p[3*i+1] == linecol[1] and p[3*i+2] == linecol[2]):
+            lineidx = i
+        if startidx == -1 and (p[3*i] == startcol[0] and p[3*i+1] == startcol[1] and p[3*i+2] == startcol[2]):
+            startidx = i
+        if speedidx == -1 and (p[3*i] == speedcol[0] and p[3*i+1] == speedcol[1] and p[3*i+2] == speedcol[2]):
+            speedidx = i
+    if emptyidx == -1 or lineidx == -1 or startidx == -1 or speedidx == -1:
+        raise RuntimeError("cannot find colors for start") from None
+    return (emptyidx, lineidx, startidx, speedidx)
+
+def findpixel(im, data, idx):
+    for y in range(im.height):
+        for x in range(im.width):
+            if getpixel(im, data, x, y) == idx:
+                return (x,y)
+    raise RuntimeError("no starting/speed point found") from None
+
+def findstart(im, data, startidx, speedidx):
+    x,y = findpixel(im, data, startidx)
+    dx,dy = findpixel(im, data, speedidx)
+
+    return (x,y, dx-x,dy-y)
+
+def getfinal(im, data):
+    emptyidx, lineidx, startidx, speedidx = colidxs(im)
+    x,y,vx,vy = findstart(im, data, startidx, speedidx)
+    res = { (x,y): True }
+
+    if vy != 0:
         i = 1
-        while x + i < im.width and getpixel(im, data, x + i, y) == color:
+        while x + i < im.width and getpixel(im, data, x + i, y) == lineidx:
             res[(x + 1,y)] = True
             i += 1
         i = 1
-        while x >= i and getpixel(im, data, x - i, y) == color:
+        while x >= i and getpixel(im, data, x - i, y) == lineidx:
             res[(x - 1,y)] = True
             i += 1
-    else:
+    elif vx != 0:
         i = 1
-        while y + i < im.height and getpixel(im, data, x, y + i) == color:
+        while y + i < im.height and getpixel(im, data, x, y + i) == lineidx:
             res[(x,y + i)] = True
             i += 1
         i = 1
-        while y >= i and getpixel(im, data, x, y - i) == color:
+        while y >= i and getpixel(im, data, x, y - i) == lineidx:
             res[(x,y - i)] = True
             i += 1
+    else:
+        raise RuntimeError("invalid speed") from None
 
-    return res
+    return (res, (x,y), (vx,vy), emptyidx, speedidx)
 
-def getdist(x, y):
-    return dist[x][y]
-
-def setdist(x, y, v):
-    dist[x][y] = v
-
-def allowed(track, data, x, y, dx, dy):
-    if getpixel(track, data, x+dx, y+dy) != 0:
+def allowed(track, data, x, y, dx, dy, allowedidx):
+    if not getpixel(track, data, x+dx, y+dy) in allowedidx:
         return False
     if abs(dx) == 1 and abs(dy) == 1:
-        if getpixel(track, data, x+dx, y) != 0 and getpixel(track, data, x, y+dy) != 0:
+        if not getpixel(track, data, x+dx, y) in allowedidx and not getpixel(track, data, x, y+dy) in allowedidx:
             return False
     return True
 
-def absspeed(speed):
-    return abs(speed[0]) + abs(speed[1])
-
 def possible_speeds(speed):
-    res= []
     speedx, speedy = speed
-    l = absspeed(speed)
-    if l > 1:
-        if speedx != 0:
-            res.append((speedx - int(speedx / abs(speedx)), speedy))
-        if speedy != 0:
-            res.append((speedx, speedy - int(speedy / abs(speedy))))
-    res.append(speed)
+    dspeedy = 1 if speedy > 0 else -1
     if speedx != 0:
+        dspeedx = 1 if speedx > 0 else -1
         if speedy != 0:
-            res.append((speedx - int(speedx / abs(speedx)), speedy + int(speedy / abs(speedy))))
-        else:
-            res.append((speedx - int(speedx / abs(speedx)), 1))
-            res.append((speedx - int(speedx / abs(speedx)), -1))
-    if speedy != 0:
-        if speedx != 0:
-            res.append((speedx + int(speedx / abs(speedx)), speedy - int(speedy / abs(speedy))))
-        else:
-            res.append((1, speedy - int(speedy / abs(speedy))))
-            res.append((-1, speedy - int(speedy / abs(speedy))))
-    if speedx != 0:
-        res.append((speedx + int(speedx / abs(speedx)), speedy))
-    else:
-        res.append((1, speedy))
-        res.append((-1, speedy))
-    if speedy != 0:
-        res.append((speedx, speedy + int(speedy / abs(speedy))))
-    else:
-        res.append((speedx, 1))
-        res.append((speedx, -1))
+            return [speed,
+                    (speedx - dspeedx, speedy + dspeedy),
+                    (speedx + dspeedx, speedy - dspeedy),
+                    (speedx, speedy + dspeedy),
+                    (speedx - dspeedx, speedy),
+                    (speedx, speedy - dspeedy),
+                    (speedx + dspeedx, speedy)]
+        res = [speed,
+               (speedx - dspeedx, 1),
+               (speedx - dspeedx, -1),
+               (speedx, 1),
+               (speedx, -1),
+               (speedx + dspeedx, 0)]
+        if abs(speedx) > 1:
+            res.append((speedx - dspeedx, 0))            
+        return res
+    res = [speed,
+           (1, speedy - dspeedy),
+           (-1, speedy - dspeedy),
+           (0, speedy + dspeedy),
+           (1, speedy),
+           (-1, speedy)]
+    if abs(speedy) > 1:
+        res.append((0, speedy - dspeedy))
     return res
 
-def getr(dist, x, y, vx, vy):
-    d1 = dist[x][y]
-    d2 = dist[x+vx][y+vy]
-    va = absspeed((vx,vy))
+def getr(d1, d2, va, Qgoal):
     if d1 < 0 or d2 < 0 or d1 - d2 > va:
         return None
 
     if d1 < d2:
+        if d1 <= va and d2 > 5 * va:
+            return Qgoal
         return (d1 - d2) - (va >> 1) / (d1 - d2)
     else:
         return (1 + d1 - d2) * va
@@ -118,7 +140,7 @@ def getr(dist, x, y, vx, vy):
 def known_speeds(score, speeds):
     return [ s for s in speeds if s in score ]
 
-def dump_score(nr, track, score, final, extra=None):
+def dump_score(nr, trackname, track, tbbl, tbbr, tbbt, tbbb, score, final, extra=None):
     width = track.width
     height = track.height
     with Image.new('RGB', (width, height)) as img:
@@ -133,6 +155,8 @@ def dump_score(nr, track, score, final, extra=None):
                 if len(sc) > 0:
                     maxscore = max(maxscore, sc[max(sc, key=sc.get)])
 
+        if maxscore == 0.0:
+            return
         maxscore = log(maxscore)
         if maxscore == 0.0:
             return
@@ -159,16 +183,16 @@ def dump_score(nr, track, score, final, extra=None):
                 gen[co[0]+co[1]*width] = (np.uint8(255),np.uint8(0),np.uint8(0))
 
         img.putdata(gen)
-        img.save("track1-sol-{:07d}.png".format(nr))
+        img.save("{}-sol-{:07d}.png".format(trackname, nr))
 
-def best_path(score, start, v):
+def best_path(dist, score, start, v, tracklen):
     res = [ start ]
     prevco = start
     co = (start[0]+v[0], start[1]+v[1])
-    d = getdist(*co)
+    d = dist[co[0]][co[1]]
     prevd = d+1
 
-    while prevd - d <= absspeed(v):
+    while (prevd > absspeed(v) or d < 10 * tracklen) and len(res) < 2 * tracklen:
         res.append(co)
         speeds = possible_speeds(v)
         s = score[co[0]][co[1]]
@@ -185,131 +209,159 @@ def best_path(score, start, v):
         prevco = co
         prevd = d
         co = (co[0]+bestmove[0],co[1]+bestmove[1])
-        d = getdist(*co)
+        d = dist[co[0]][co[1]]
     return res
 
-with Image.open(trackname) as track:
-    data = track.getdata()
+def compute(trackname, epsilon, alpha, gamma, Q0, Qfail, Qgoal):
+    trackfname = trackname+".png"
+    with Image.open(trackfname) as track:
+        data = track.getdata()
 
-    dist = [[-1]*track.height for i in range(track.width)]
-    score = [[{} for j in range(track.height)] for i in range(track.width)]
+        dist = [[-1]*track.height for i in range(track.width)]
+        score = [[{} for j in range(track.height)] for i in range(track.width)]
 
-    final = getfinal(track, data, start, startspeed)
+        final, start, startspeed, emptyidx, speedidx = getfinal(track, data)
+        allowedidx = [emptyidx, speedidx]
 
-    for co in final:
-        setdist(*co, 0)
+        dir = (int(norm(startspeed[0])), int(norm(startspeed[1])))
 
-    dir = (int(norm(startspeed[0])), int(norm(startspeed[1])))
+        candidates = []
+        for co in final:
+            dist[co[0]][co[1]] = 0
+            if getpixel(track, data, co[0]-dir[0], co[1]-dir[1]) in allowedidx:
+                candidates.append((co[0]-dir[0], co[1]-dir[1]))
 
-    candidates = [ (x-dir[0], y-dir[1]) for x,y in final if getpixel(track, data, x-dir[0], y-dir[1]) == 0 ]
-    tracklen = 1
+        tracklen = 1
 
-    while len(candidates) > 0:
-        nextc = []
+        while len(candidates) > 0:
+            nextc = []
 
-        for ca in candidates:
-            if getpixel(track, data, *ca) == 0 and dist[ca[0]][ca[1]] < 0:
-                setdist(*ca, tracklen)
+            for ca in candidates:
+                if getpixel(track, data, *ca) in allowedidx and dist[ca[0]][ca[1]] < 0:
+                    dist[ca[0]][ca[1]] = tracklen
 
-                for dx,dy in [(-1, 0), (0, -1), (0, 1), (1, 0)]:
-                    co = (ca[0]+dx, ca[1]+dy)
+                    for dx,dy in [(-1, 0), (0, -1), (0, 1), (1, 0)]:
+                        co = (ca[0]+dx, ca[1]+dy)
 
-                    if dist[co[0]][co[1]] < 0 and not co in candidates and allowed(track, data, *ca, dx, dy):
-                        nextc.append(co)
-        candidates = list(set(nextc))
-        tracklen += 1
+                        if dist[co[0]][co[1]] < 0 and not co in candidates and allowed(track, data, *ca, dx, dy, allowedidx):
+                            nextc.append(co)
+            candidates = list(set(nextc))
+            tracklen += 1
 
-    # bounding box for track
-    tbbl = -1
-    tbbr = -1
-    tbbt = -1
-    tbbb = -1
-    for i in range(track.width):
-        if tbbl < 0 and max(dist[i]) >= 0:
-            tbbl = i
-        if tbbr < 0 and max(dist[track.width-1-i]) >= 0:
-            tbbr = track.width-1-i
-    for i in range(track.height):
-        for j in range(track.width):
-            if tbbt < 0 and dist[j][i] >= 0:
-                tbbt = i
-            if tbbb < 0 and dist[j][track.height-1-i] >= 0:
-                tbbb = track.height-1-i
-    tbbw = tbbr - tbbl + 1
-    tbbh = tbbb - tbbt + 1
+        # bounding box for track
+        tbbl = -1
+        tbbr = -1
+        tbbt = -1
+        tbbb = -1
+        for i in range(track.width):
+            if tbbl < 0 and max(dist[i]) >= 0:
+                tbbl = i
+            if tbbr < 0 and max(dist[track.width-1-i]) >= 0:
+                tbbr = track.width-1-i
+        for i in range(track.height):
+            for j in range(track.width):
+                if tbbt < 0 and dist[j][i] >= 0:
+                    tbbt = i
+                if tbbb < 0 and dist[j][track.height-1-i] >= 0:
+                    tbbb = track.height-1-i
+        tbbw = tbbr - tbbl + 1
+        tbbh = tbbb - tbbt + 1
 
-    totalrounds = 4000000
-    for rounds in range(totalrounds):
-        co = (start[0] + startspeed[0], start[1] + startspeed[1])
-        speed = startspeed
-        prevdist = getdist(*co)
-        path = [ ]
-        while True:
-            curdist = getdist(*co)
-            if curdist <= 0 or prevdist - curdist > absspeed(speed):
-                break
-            # print("distance: {}".format(curdist))
-            path.append((speed, co))
-
+        random.seed(42)
+        totalrounds = 20000#4000000
+        tq = tqdm(total=totalrounds, desc=trackname)
+        for rounds in range(totalrounds):
+            co = (start[0] + startspeed[0], start[1] + startspeed[1])
+            speed = startspeed
+            aspeed = absspeed(speed)
             nextspeeds = possible_speeds(speed)
-            if random.random() < epsilon:
-                nextspeed = random.sample(nextspeeds, 1)[0]
-            else:
-                # Pick according to current score
-                known = known_speeds(score[co[0]][co[1]], nextspeeds)
+            curdist = dist[co[0]][co[1]]
+            path = [ ]
+            reached_goal = False
+            while True:
+                path.append((speed, co))
 
-                bestscore = -1
-                bestspeeds = []
-                for s in known:
-                    thisscore = score[co[0]][co[1]][s] if s in score[co[0]][co[1]] else 0.0
-                    if thisscore == bestscore:
-                        bestspeeds.append(s)
-                    elif thisscore > bestscore:
-                        bestscore = thisscore
-                        bestspeeds = [ s ]
-                if bestscore < 0:
-                    if len(known) == len(nextspeeds):
-                        # All speeds bad
-                        for s in nextspeeds:
-                            score[co[0]][co[1]][s] = -100
-                        break
-                    nextspeed = random.sample(set(nextspeeds) - set(score[co[0]][co[1]].keys()), 1)[0]
+                if random.random() < epsilon:
+                    nextspeed = random.sample(nextspeeds, 1)[0]
                 else:
-                    nextspeed = random.sample(bestspeeds, 1)[0]
+                    # Pick according to current score
+                    known = known_speeds(score[co[0]][co[1]], nextspeeds)
 
-            newco = (co[0] + nextspeed[0], co[1] + nextspeed[1])
+                    bestscore = Qfail
+                    bestspeeds = []
+                    for s in known:
+                        thisscore = score[co[0]][co[1]][s]
+                        if thisscore == bestscore:
+                            bestspeeds.append(s)
+                        elif thisscore > bestscore:
+                            bestscore = thisscore
+                            bestspeeds = [ s ]
+                    if bestscore < Q0 and len(known) != len(nextspeeds):
+                        nextspeed = random.sample(set(nextspeeds) - set(known), 1)[0]
+                    else:
+                        nextspeed = random.sample(bestspeeds, 1)[0]
 
-            r = getr(dist, *co, *nextspeed)
-            if not r:
-                # crash
-                score[co[0]][co[1]][nextspeed] = -100
-                break
+                nextco = (co[0] + nextspeed[0], co[1] + nextspeed[1])
+                nextdist = dist[nextco[0]][nextco[1]]
+                nextaspeed = absspeed(nextspeed)
 
-            nextscores = score[newco[0]][newco[1]]
-            speedspp = possible_speeds(nextspeed)
-            known = known_speeds(nextscores, speedspp)
-            if len(known) == 0:
-                nextbestscore = Q0
-            else:
-                knownscores = [nextscores[k] for k in known]
-                nextbestscore =  max(knownscores)
-                if nextbestscore < Q0 and len(speedspp) > len(known):
-                    nextbestscore = Q0
+                r = getr(curdist, nextdist, nextaspeed, Qgoal)
+                if not r:
+                    # crash
+                    ##print("crash at ({},{})".format(co[0]+nextspeed[0],co[1]+nextspeed[1]))
+                    score[co[0]][co[1]][nextspeed] = Qfail
+                    break
 
-            if nextspeed in score[co[0]][co[1]]:
-                score[co[0]][co[1]][nextspeed] = (1 - alpha) * score[co[0]][co[1]][nextspeed] + alpha * (r + gamma * nextbestscore - score[co[0]][co[1]][nextspeed])
-            else:
-                score[co[0]][co[1]][nextspeed] = (1 - alpha) * Q0 + alpha * (r + gamma * nextbestscore)
+                if curdist <= aspeed and nextdist > 10 * aspeed:
+                    nextbestscore = Qgoal
+                    reached_goal = True
+                else:
+                    nextscores = score[nextco[0]][nextco[1]]
+                    speedspp = possible_speeds(nextspeed)
+                    known = known_speeds(nextscores, speedspp)
+                    if len(known) == 0:
+                        nextbestscore = Q0
+                    else:
+                        knownscores = [nextscores[k] for k in known]
+                        nextbestscore =  max(knownscores)
+                        if nextbestscore < Q0 and len(speedspp) > len(known):
+                            nextbestscore = Q0
 
-            co = newco
-            speed = nextspeed
-            prevdist = curdist
+                oldval = score[co[0]][co[1]][nextspeed] if nextspeed in score[co[0]][co[1]] else Q0
+                score[co[0]][co[1]][nextspeed] = (1 - alpha) * oldval + alpha * (r + gamma * nextbestscore)
 
-        # print("path = {}".format(path))
-        print("stop at {}".format(co))
+                if reached_goal or len(path) > 5 * tracklen:
+                    break
 
-        if rounds % 10000 == 0:
-            dump_score(rounds, track, score, final)
+                co = nextco
+                speed = nextspeed
+                aspeed = nextaspeed
+                nextspeeds = speedspp
+                curdist = nextdist
+
+            #print("stop at {}".format(co))
+
+            tq.update()
+            if rounds % 10000 == 0:
+                dump_score(rounds, trackname, track, tbbl, tbbr, tbbt, tbbb, score, final, best_path(dist, score, start, startspeed, tracklen))
 
 
-    dump_score(totalrounds, track, score, final, best_path(score, start, startspeed))
+        tq.close()
+        dump_score(totalrounds, trackname, track, tbbl, tbbr, tbbt, tbbb, score, final, best_path(dist, score, start, startspeed, tracklen))
+
+if __name__ == '__main__':
+    trackname = "track2"
+
+    parser = argparse.ArgumentParser(description='Racing with Reinforcement Learning.', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('fnames', metavar='FNAME', type=str, nargs='+', help='PNG of track')
+    parser.add_argument('--epsilon', dest='epsilon', type=float, default=0.01, help='Fraction of random steps')
+    parser.add_argument('--alpha', dest='alpha', type=float, default=0.1, help='Learning Rate')
+    parser.add_argument('--gamma', dest='gamma', type=float, default=0.95, help='Discount Factor')
+    parser.add_argument('--Q0', dest='Q0', type=float, default=0.0, help='Initial Q function value')
+    parser.add_argument('--Qfail', dest='Qfail', type=float, default=-10000, help='Q function value for crash')
+    parser.add_argument('--Qgoal', dest='Qgoal', type=float, default=1000, help='Q function value for reaching goal')
+    args=parser.parse_args()
+
+    for trackname in args.fnames:
+        compute(trackname, args.epsilon, args.alpha, args.gamma, args.Q0, args.Qfail, args.Qgoal)
+        pass
