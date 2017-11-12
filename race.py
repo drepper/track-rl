@@ -267,8 +267,7 @@ def compute(trackname, epsilon, alpha, gamma, Q0, Qfail, Qgoal):
         tbbw = tbbr - tbbl + 1
         tbbh = tbbb - tbbt + 1
 
-        random.seed(42)
-        totalrounds = 20000#4000000
+        totalrounds = 4000000
         tq = tqdm(total=totalrounds, desc=trackname)
         for rounds in range(totalrounds):
             co = (start[0] + startspeed[0], start[1] + startspeed[1])
@@ -276,8 +275,24 @@ def compute(trackname, epsilon, alpha, gamma, Q0, Qfail, Qgoal):
             aspeed = absspeed(speed)
             nextspeeds = possible_speeds(speed)
             curdist = dist[co[0]][co[1]]
+            scores = score[co[0]][co[1]]
+            speedspp = possible_speeds(speed)
+            known = known_speeds(scores, nextspeeds)
+            bestscore = Qfail
+            bestspeeds = []
+            for s in known:
+                thisscore = scores[s]
+                if thisscore == bestscore:
+                    bestspeeds.append(s)
+                elif thisscore > bestscore:
+                    bestscore = thisscore
+                    bestspeeds = [ s ]
+            if bestscore < Q0 and len(known) != len(speedspp):
+                bestscore = Q0
+                bestspeeds = set(nextspeeds) - set(known)
             path = [ ]
             reached_goal = False
+
             while True:
                 path.append((speed, co))
 
@@ -285,21 +300,7 @@ def compute(trackname, epsilon, alpha, gamma, Q0, Qfail, Qgoal):
                     nextspeed = random.sample(nextspeeds, 1)[0]
                 else:
                     # Pick according to current score
-                    known = known_speeds(score[co[0]][co[1]], nextspeeds)
-
-                    bestscore = Qfail
-                    bestspeeds = []
-                    for s in known:
-                        thisscore = score[co[0]][co[1]][s]
-                        if thisscore == bestscore:
-                            bestspeeds.append(s)
-                        elif thisscore > bestscore:
-                            bestscore = thisscore
-                            bestspeeds = [ s ]
-                    if bestscore < Q0 and len(known) != len(nextspeeds):
-                        nextspeed = random.sample(set(nextspeeds) - set(known), 1)[0]
-                    else:
-                        nextspeed = random.sample(bestspeeds, 1)[0]
+                    nextspeed = random.sample(bestspeeds, 1)[0]
 
                 nextco = (co[0] + nextspeed[0], co[1] + nextspeed[1])
                 nextdist = dist[nextco[0]][nextco[1]]
@@ -316,19 +317,24 @@ def compute(trackname, epsilon, alpha, gamma, Q0, Qfail, Qgoal):
                     nextbestscore = Qgoal
                     reached_goal = True
                 else:
-                    nextscores = score[nextco[0]][nextco[1]]
+                    scores = score[nextco[0]][nextco[1]]
                     speedspp = possible_speeds(nextspeed)
-                    known = known_speeds(nextscores, speedspp)
-                    if len(known) == 0:
-                        nextbestscore = Q0
-                    else:
-                        knownscores = [nextscores[k] for k in known]
-                        nextbestscore =  max(knownscores)
-                        if nextbestscore < Q0 and len(speedspp) > len(known):
-                            nextbestscore = Q0
+                    known = known_speeds(scores, speedspp)
+                    bestscore = Qfail
+                    bestspeeds = []
+                    for s in known:
+                        thisscore = scores[s]
+                        if thisscore == bestscore:
+                            bestspeeds.append(s)
+                        elif thisscore > bestscore:
+                            bestscore = thisscore
+                            bestspeeds = [ s ]
+                    if bestscore < Q0 and len(known) != len(speedspp):
+                        bestscore = Q0
+                        bestspeeds = set(speedspp) - set(known)
 
                 oldval = score[co[0]][co[1]][nextspeed] if nextspeed in score[co[0]][co[1]] else Q0
-                score[co[0]][co[1]][nextspeed] = (1 - alpha) * oldval + alpha * (r + gamma * nextbestscore)
+                score[co[0]][co[1]][nextspeed] = (1 - alpha) * oldval + alpha * (r + gamma * bestscore)
 
                 if reached_goal or len(path) > 5 * tracklen:
                     break
