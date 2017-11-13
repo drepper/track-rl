@@ -355,8 +355,6 @@ def compute(trackname, epsilon, alpha, gamma, Q0, Qfail, Qgoal, totalrounds):
         dump_score(totalrounds, trackname, track, tbbl, tbbr, tbbt, tbbb, score, final, best_path(dist, score, start, startspeed, tracklen))
 
 if __name__ == '__main__':
-    trackname = "track2"
-
     parser = argparse.ArgumentParser(description='Racing with Reinforcement Learning.', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('fnames', metavar='FNAME', type=str, nargs='+', help='PNG of track')
     parser.add_argument('--epsilon', dest='epsilon', type=float, default=0.01, help='Fraction of random steps')
