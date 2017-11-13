@@ -275,7 +275,6 @@ def compute(trackname, epsilon, alpha, gamma, Q0, Qfail, Qgoal, totalrounds):
             nextspeeds = possible_speeds(speed)
             curdist = dist[co[0]][co[1]]
             scores = score[co[0]][co[1]]
-            speedspp = possible_speeds(speed)
             known = known_speeds(scores, nextspeeds)
             bestscore = Qfail
             bestspeeds = []
@@ -286,7 +285,7 @@ def compute(trackname, epsilon, alpha, gamma, Q0, Qfail, Qgoal, totalrounds):
                 elif thisscore > bestscore:
                     bestscore = thisscore
                     bestspeeds = [ s ]
-            if bestscore < Q0 and len(known) != len(speedspp):
+            if bestscore < Q0 and len(known) != len(nextspeeds):
                 bestscore = Q0
                 bestspeeds = set(nextspeeds) - set(known)
             path = [ ]

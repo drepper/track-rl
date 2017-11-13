@@ -70,7 +70,7 @@ Running the Program
 
 The program can be run from the command line or from the Python console (e.g., the IPython interactive session).
 
-    $ python3 race.py track1
+    $ python3 race.py --N 20000 track1
     track1: 100%|███████████████████████████| 20000/20000 [00:24<00:00, 809.97it/s]
 
 The required positional parameters of the program name the tracks.  There are supposed to be PNG files with the filenames `FNAME.png` present in the current directory, where `FNAME` is the track name given on the command line.  More than one track name can be given in the same invocation; the tracks are worked on sequentially.
